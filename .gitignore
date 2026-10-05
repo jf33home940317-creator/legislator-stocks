@@ -1,0 +1,16 @@
+# 虛擬環境
+.venv/
+
+# Python 自動產生的快取
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 密碼與機密設定
+.env
+
+# 資料庫和執行時產生的資料
+data/*.db
+data/*.db-*
+data/backups/
+data/*.log
