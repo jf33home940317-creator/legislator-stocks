@@ -80,3 +80,19 @@ def sample_data(session):
     session.add_all([wang, lee, chen])
     session.commit()
     return {"wang": wang, "lee": lee, "chen": chen}
+
+
+@pytest.fixture
+def client(session_factory):
+    from fastapi.testclient import TestClient
+
+    from app.api.deps import get_session
+    from app.api.main import app
+
+    def override_get_session():
+        with session_factory() as s:
+            yield s
+
+    app.dependency_overrides[get_session] = override_get_session
+    yield TestClient(app)
+    app.dependency_overrides.clear()
