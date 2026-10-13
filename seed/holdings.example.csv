@@ -1,0 +1,4 @@
+politician_id,declared_date,source_url,stock_code,owner,shares
+1,2026-06-29,https://example.com/demo-1.pdf,2330,本人,10000
+1,2026-06-29,https://example.com/demo-1.pdf,2317,配偶,1000
+2,2026-06-29,https://example.com/demo-2.pdf,2330,本人,1000
