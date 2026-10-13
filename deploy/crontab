@@ -1,0 +1,9 @@
+# 伺服器時區是 UTC，台灣時間 = UTC + 8
+APP=/home/yicheng/apps/legislator-stocks
+
+# 週一到週五 台灣 17:00（= UTC 09:00）抓股價，18:30（= UTC 10:30）再抓一次作為保險
+0 9 * * 1-5   cd $APP && docker compose exec -T api python -m app.crawler prices >> $APP/data/cron.log 2>&1
+30 10 * * 1-5 cd $APP && docker compose exec -T api python -m app.crawler prices >> $APP/data/cron.log 2>&1
+
+# 每天 台灣 03:00（= UTC 19:00）備份資料庫
+0 19 * * *    cd $APP && docker compose exec -T api python -m app.backup >> $APP/data/cron.log 2>&1

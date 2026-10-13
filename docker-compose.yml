@@ -1,0 +1,12 @@
+services:
+  api:
+    build: .
+    container_name: legislator-stocks-api
+    restart: unless-stopped          # 伺服器重開機後自動把容器拉起來
+    ports:
+      - "8000:8000"                  # 伺服器的 8000 埠 → 容器的 8000 埠
+    env_file: .env                   # 讀取 .env 裡的 ADMIN_API_KEY、CORS_ORIGINS
+    environment:
+      DATABASE_URL: sqlite:////data/app.db   # 四條斜線 = 絕對路徑 /data/app.db
+    volumes:
+      - ./data:/data                 # 伺服器的 ./data ←→ 容器的 /data（資料庫放這，不會遺失）
