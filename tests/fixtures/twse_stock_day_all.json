@@ -1,0 +1,5 @@
+[
+  {"Date": "1150929", "Code": "2330", "Name": "台積電", "TradeVolume": "26893348", "TradeValue": "66658833984", "OpeningPrice": "2475.00", "HighestPrice": "2495.00", "LowestPrice": "2475.00", "ClosingPrice": "2475.00", "Change": "0.0000", "Transaction": "62248"},
+  {"Date": "1150929", "Code": "00625K", "Name": "富邦上証+R", "TradeVolume": "", "TradeValue": "", "OpeningPrice": "", "HighestPrice": "", "LowestPrice": "", "ClosingPrice": "", "Change": "0.0000", "Transaction": ""},
+  {"Date": "1150929", "Code": "2317", "Name": "鴻海", "TradeVolume": "1000", "TradeValue": "200500", "OpeningPrice": "200.00", "HighestPrice": "201.00", "LowestPrice": "199.00", "ClosingPrice": "200.50", "Change": "+0.5000", "Transaction": "10"}
+]
