@@ -2,7 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from app.crawler import esb_prices, tpex_prices, twse_prices
+from app.crawler import esb_prices, legislators, tpex_prices, twse_prices
 from app.crawler.base import Job, run_crawler
 from app.crawler.declarations.csv_import import import_holdings, import_politicians
 from app.db import SessionLocal
@@ -19,6 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.crawler")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("prices", help="抓上市＋上櫃＋興櫃股價")
+    sub.add_parser("legislators", help="抓立法院第11屆立委名單")
     for name in PRICE_JOBS:
         sub.add_parser(name)
     for name in ("import_politicians", "import_holdings"):
@@ -27,6 +28,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "prices":
         jobs = dict(PRICE_JOBS)
+    elif args.command == "legislators":
+        jobs = {"legislators": legislators.job}
     elif args.command in PRICE_JOBS:
         jobs = {args.command: PRICE_JOBS[args.command]}
     elif args.command == "import_politicians":
