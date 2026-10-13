@@ -1,0 +1,27 @@
+name: CI
+
+# 每次推送到 main、或對 main 發 PR 時自動執行
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取得程式碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安裝套件
+        run: pip install -r requirements-dev.txt
+
+      - name: 執行測試
+        run: python -m pytest -q
