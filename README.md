@@ -1,5 +1,7 @@
 # 立委持股查詢：後端
 
+[![CI](https://github.com/jf33home940317-creator/legislator-stocks/actions/workflows/ci.yml/badge.svg)](https://github.com/jf33home940317-creator/legislator-stocks/actions/workflows/ci.yml)
+
 爬取證交所／櫃買中心每日股價（上市、上櫃、興櫃），搭配立法委員財產申報的持股資料，
 用「持股 × 最新收盤價」估算市值，並提供 JSON API。
 
