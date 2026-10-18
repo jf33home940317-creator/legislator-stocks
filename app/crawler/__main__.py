@@ -5,6 +5,7 @@ from pathlib import Path
 from app.crawler import esb_prices, legislators, tpex_prices, twse_prices
 from app.crawler.base import Job, run_crawler
 from app.crawler.declarations.csv_import import import_holdings, import_politicians
+from app.crawler.declarations.review import build_review
 from app.db import SessionLocal
 
 # 三個股價爬蟲
@@ -24,6 +25,9 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(name)
     for name in ("import_politicians", "import_holdings"):
         sub.add_parser(name).add_argument("csv", type=Path)
+    review = sub.add_parser("review_declarations", help="下載監察院 PDF，輸出待審核的持股 CSV")
+    review.add_argument("csv", type=Path, help="輸出的審核 CSV 路徑")
+    review.add_argument("names", nargs="+", help="立委姓名（可多位）")
     args = parser.parse_args(argv)
 
     if args.command == "prices":
@@ -32,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
         jobs = {"legislators": legislators.job}
     elif args.command in PRICE_JOBS:
         jobs = {args.command: PRICE_JOBS[args.command]}
+    elif args.command == "review_declarations":
+        jobs = {args.command: lambda s: build_review(s, args.names, args.csv)}
     elif args.command == "import_politicians":
         jobs = {args.command: lambda s: (import_politicians(s, args.csv), str(args.csv))}
     else:
