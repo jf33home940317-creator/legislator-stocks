@@ -83,5 +83,13 @@ def save_prices(session, rows: list[PriceRow]) -> int:
     return len(rows)
 
 
-def skipped_message(skipped: int) -> str | None:
-    return f"跳過 {skipped} 筆沒有收盤價的資料" if skipped else None
+def price_message(rows: list[PriceRow], skipped: int) -> str | None:
+    """爬蟲紀錄的備註。一定寫出資料日期：資料源偶爾晚更新，會「成功」抓到舊資料，
+    沒寫日期的話，log 看起來一切正常（2026-10-16 TWSE 就發生過）。"""
+    parts = []
+    if rows:
+        first, last = min(r.date for r in rows), max(r.date for r in rows)
+        parts.append(f"資料日期 {first}" if first == last else f"資料日期 {first}～{last}")
+    if skipped:
+        parts.append(f"跳過 {skipped} 筆沒有收盤價的資料")
+    return "，".join(parts) or None

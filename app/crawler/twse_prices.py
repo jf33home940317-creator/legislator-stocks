@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.crawler.base import fetch_json
-from app.crawler.prices import PriceRow, parse_quotes, save_prices, skipped_message
+from app.crawler.prices import PriceRow, parse_quotes, price_message, save_prices
 
 URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
 
@@ -15,4 +15,4 @@ def parse(data: Any) -> tuple[list[PriceRow], int]:
 
 def job(session: Session) -> tuple[int, str | None]:
     rows, skipped = parse(fetch_json(URL))
-    return save_prices(session, rows), skipped_message(skipped)
+    return save_prices(session, rows), price_message(rows, skipped)

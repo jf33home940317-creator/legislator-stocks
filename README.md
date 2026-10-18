@@ -90,7 +90,7 @@ docker compose exec -T api python -m app.crawler prices
 docker compose exec -T api python -m app.backup
 ```
 
-- 排程設定在 `deploy/crontab`（每天台灣 17:00、18:30 抓股價，03:00 備份），記錄檔在伺服器 `data/cron.log`
+- 排程設定在 `deploy/crontab`（週一～五台灣 17:00、18:30 抓股價，週二～六 08:00 補抓前一交易日，每天 03:00 備份），記錄檔在伺服器 `data/cron.log`；每筆股價紀錄會寫出「資料日期」，可看出是否抓到舊資料
 - 環境變數在伺服器的 `.env`（`ADMIN_API_KEY`、`CORS_ORIGINS`），不進 git
 - 資料庫檔案在 `data/app.db`（Docker volume，重建容器不會遺失）
 

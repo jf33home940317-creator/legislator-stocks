@@ -4,6 +4,9 @@ APP=/home/yicheng/apps/legislator-stocks
 # 週一到週五 台灣 17:00（= UTC 09:00）抓股價，18:30（= UTC 10:30）再抓一次作為保險
 0 9 * * 1-5   cd $APP && docker compose exec -T api python -m app.crawler prices >> $APP/data/cron.log 2>&1
 30 10 * * 1-5 cd $APP && docker compose exec -T api python -m app.crawler prices >> $APP/data/cron.log 2>&1
+# 週二到週六 台灣 08:00（= UTC 00:00）補抓前一個交易日：證交所 OpenAPI 偶爾到晚上都還沒更新
+# （2026-10-16 18:30 仍是 10-15 的資料）。寫入是 upsert，重複抓不會產生重複資料
+0 0 * * 2-6   cd $APP && docker compose exec -T api python -m app.crawler prices >> $APP/data/cron.log 2>&1
 
 # 每天 台灣 03:00（= UTC 19:00）備份資料庫
 0 19 * * *    cd $APP && docker compose exec -T api python -m app.backup >> $APP/data/cron.log 2>&1

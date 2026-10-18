@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 
 from app.crawler import twse_prices
 from app.crawler.base import CrawlError
-from app.crawler.prices import PriceRow, save_prices
+from app.crawler.prices import PriceRow, price_message, save_prices
 from app.models import Stock, StockPrice
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -57,4 +57,23 @@ def test_job_uses_fetched_data(session, monkeypatch):
                         lambda url: load("twse_stock_day_all.json"))
     rows, message = twse_prices.job(session)
     assert rows == 2
-    assert message == "跳過 1 筆沒有收盤價的資料"
+    assert message == "資料日期 2026-09-29，跳過 1 筆沒有收盤價的資料"
+
+
+# ---------- price_message：log 一定要看得出資料日期 ----------
+
+def _row(day: int) -> PriceRow:
+    return PriceRow(code="2330", name="台積電", market="TWSE",
+                    date=dt.date(2026, 10, day), close=Decimal("1000"))
+
+
+def test_price_message_shows_data_date():
+    assert price_message([_row(16), _row(16)], 0) == "資料日期 2026-10-16"
+
+
+def test_price_message_shows_date_range_and_skipped():
+    assert price_message([_row(15), _row(16)], 3) == "資料日期 2026-10-15～2026-10-16，跳過 3 筆沒有收盤價的資料"
+
+
+def test_price_message_empty():
+    assert price_message([], 0) is None

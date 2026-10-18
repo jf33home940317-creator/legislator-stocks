@@ -24,7 +24,7 @@ def test_tpex_parse():
 
 def test_tpex_job(session, monkeypatch):
     monkeypatch.setattr(tpex_prices, "fetch_json", lambda url: load("tpex_daily_close.json"))
-    assert tpex_prices.job(session) == (1, "跳過 1 筆沒有收盤價的資料")
+    assert tpex_prices.job(session) == (1, "資料日期 2026-09-30，跳過 1 筆沒有收盤價的資料")
 
 
 # ---------- 興櫃 ESB ----------
@@ -38,4 +38,4 @@ def test_esb_parse():
 
 def test_esb_job(session, monkeypatch):
     monkeypatch.setattr(esb_prices, "fetch_json", lambda url: load("tpex_esb_latest.json"))
-    assert esb_prices.job(session) == (1, "跳過 1 筆沒有收盤價的資料")
+    assert esb_prices.job(session) == (1, "資料日期 2026-09-30，跳過 1 筆沒有收盤價的資料")
