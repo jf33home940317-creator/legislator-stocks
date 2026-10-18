@@ -10,6 +10,7 @@ import time
 from collections.abc import Iterable
 from pathlib import Path
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -82,40 +83,57 @@ def write_review_csv(rows: Iterable[dict], path: Path) -> None:
         writer.writerows(rows)
 
 
+def review_one(client, session: Session, name: str, codes_by_name: dict[str, str],
+               aliases: dict[str, str], delay: float) -> tuple[list[dict], str]:
+    """處理一位立委：查詢 → 下載（已下載就用舊檔）→ 解析。回傳（審核列, 備註）。"""
+    # 用 startswith：輸入「伍麗華」也找得到「伍麗華Saidhai‧Tahovecahe」
+    politician = session.scalars(select(Politician).where(Politician.name.startswith(name))).first()
+    if politician is None:
+        raise CrawlError("資料庫沒有這位立委，請先跑 python -m app.crawler legislators")
+    query_name = chinese_name(name)
+    latest = cy_pdf.pick_latest(cy_pdf.query_declarations(client, query_name))
+    time.sleep(delay)   # 對政府網站客氣一點
+    if latest is None:
+        return [], "查無立法院一般申報"
+
+    path = PDF_DIR / f"{query_name}_{latest['Period']}.pdf"
+    if not path.exists():
+        cy_pdf.save_pdf(cy_pdf.download_pdf(client, latest["Id"]), path)
+        time.sleep(delay)
+
+    text = pdf_text(path)
+    header = parse_header(text)
+    if header.declarant != query_name:     # 防止把別人的持股掛到這位立委身上
+        raise CrawlError(f"PDF 申報人是 {header.declarant}，不是 {query_name}")
+    stocks, stated = parse_stocks(text)
+    # 下載 API 用 POST，沒有固定網址 → 記下「第幾期第幾頁」讓人查得到
+    source = f"{cy_pdf.BASE}/layout/baselist#第{latest['Period']}期{latest['PublishPage']}"
+    rows = review_rows(politician.id, header, stocks, stated, source, codes_by_name, aliases)
+    bad = sum(1 for r in rows if r["problem"])
+    return rows, (f"{len(rows)} 檔" + (f"（{bad} 檔待處理）" if bad else "") if rows else "本欄空白")
+
+
 def build_review(session: Session, names: list[str], out: Path, *, delay: float = 1.0) -> tuple[int, str]:
-    """對每位立委：查詢 → 下載（已下載就用舊檔）→ 解析 → 寫成審核 CSV。回傳（列數, 摘要）。"""
+    """對每位立委跑 review_one，寫成一份審核 CSV。回傳（列數, 摘要）。
+
+    一位出錯不影響其他人：錯誤記在摘要裡，最後再人工處理。
+    """
     codes_by_name = {s.name: s.code for s in session.scalars(select(Stock))}
     aliases = load_aliases()
     rows: list[dict] = []
-    notes: list[str] = []
+    failed: list[str] = []
 
     with cy_pdf.make_client() as client:
-        for name in names:
-            # 用 startswith：輸入「伍麗華」也找得到「伍麗華Saidhai‧Tahovecahe」
-            politician = session.scalars(select(Politician).where(Politician.name.startswith(name))).first()
-            if politician is None:
-                raise CrawlError(f"資料庫沒有立委 {name}，請先跑 python -m app.crawler legislators")
-            query_name = chinese_name(name)
-            latest = cy_pdf.pick_latest(cy_pdf.query_declarations(client, query_name))
-            time.sleep(delay)   # 對政府網站客氣一點
-            if latest is None:
-                notes.append(f"{name}: 查無立法院一般申報")
-                continue
-
-            path = PDF_DIR / f"{query_name}_{latest['Period']}.pdf"
-            if not path.exists():
-                cy_pdf.save_pdf(cy_pdf.download_pdf(client, latest["Id"]), path)
-                time.sleep(delay)
-
-            text = pdf_text(path)
-            header = parse_header(text)
-            stocks, stated = parse_stocks(text)
-            # 下載 API 用 POST，沒有固定網址 → 記下「第幾期第幾頁」讓人查得到
-            source = f"{cy_pdf.BASE}/layout/baselist#第{latest['Period']}期{latest['PublishPage']}"
-            person = review_rows(politician.id, header, stocks, stated, source, codes_by_name, aliases)
+        for i, name in enumerate(names, start=1):
+            try:
+                person, note = review_one(client, session, name, codes_by_name, aliases, delay)
+            except (CrawlError, httpx.HTTPError, ValueError, KeyError) as exc:
+                person, note = [], f"失敗 {type(exc).__name__}: {exc}"
+                failed.append(f"{name}（{note}）")
             rows += person
-            bad = sum(1 for r in person if r["problem"])
-            notes.append(f"{name}: {len(person)} 檔" + (f"（{bad} 檔待處理）" if bad else ""))
+            print(f"[{i}/{len(names)}] {name}: {note}", flush=True)   # 跑很久，邊跑邊印進度
 
     write_review_csv(rows, out)
-    return len(rows), "；".join(notes)
+    holders = len({r["politician_id"] for r in rows})
+    summary = f"{len(names)} 位：{holders} 位有股票，失敗 {len(failed)} 位"
+    return len(rows), summary + ("。失敗：" + "；".join(failed) if failed else "")

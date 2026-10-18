@@ -74,3 +74,24 @@ def test_review_csv_with_problem_is_rejected(db, tmp_path):
     write_review_csv(rows_for([line("台積電", "王小明", 1000), line("勝華", "王小明", 1)]), path)
     with pytest.raises(CsvImportError):     # 沒處理完的問題，資料就進不去
         import_holdings(db, path)
+
+
+# ---------- build_review：一位失敗不影響其他人 ----------
+
+def test_build_review_isolates_failures(session, tmp_path, monkeypatch):
+    import contextlib
+
+    from app.crawler.base import CrawlError
+    from app.crawler.declarations import review
+
+    def fake_review_one(client, session, name, codes, aliases, delay):
+        if name == "壞掉":
+            raise CrawlError("PDF 格式可能改了")
+        return rows_for([line("台積電", "王小明", 1000)]), "1 檔"
+
+    monkeypatch.setattr(review, "review_one", fake_review_one)
+    monkeypatch.setattr(review.cy_pdf, "make_client", contextlib.nullcontext)   # 不連網
+
+    count, summary = review.build_review(session, ["甲", "壞掉", "乙"], tmp_path / "out.csv")
+    assert count == 2                     # 甲、乙都有寫進去
+    assert "失敗 1 位" in summary and "壞掉" in summary
