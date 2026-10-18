@@ -1,25 +1,32 @@
 """解析監察院財產申報 PDF：表頭（申報人、申報日、家屬）＋「(八)有價證券 1.股票」。
 
-做法：pdfplumber 只負責把 PDF 轉成純文字，其餘都是字串處理，
-所以除了 pdf_text() 以外，每個函式都可以直接拿一段文字來測試。
+做法：
+- 表頭、表上寫的總價額：用 pdf_text() 抽出的純文字 + 正規表示式
+- 股票每一列：用 pdf_tables() 依 PDF 的格線抽表格。名稱太長會換行
+  （「華南金「交付臺灣銀行信 / 託」」），純文字看不出哪段屬於哪一列，表格才分得清楚。
+pdfplumber 只出現在 pdf_text() / pdf_tables()，其餘函式都可以直接拿文字或 list 來測試。
 """
 import datetime as dt
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import pdfplumber
 
 from app.crawler.base import CrawlError
 
+Table = list[list[str | None]]   # pdfplumber 的表格：一列是一個 list，每格是字串或 None
+
 
 @dataclass(frozen=True)
 class StockLine:
-    name: str       # 股票簡稱，例如「力積電」（PDF 裡沒有代號）
-    holder: str     # 所有人姓名，例如「謝俊雄」
+    name: str           # 股票名稱，例如「力積電」「台泥「交付臺灣銀行信託」」（PDF 裡沒有代號）
+    holder: str         # 所有人姓名，例如「謝俊雄」
     shares: int
-    total: int      # 新臺幣總額＝股數 × 票面（不是市值）
-    raw: str        # PDF 原文，人工校正時方便對照
+    total: Decimal      # 新臺幣總額＝股數 × 票面（不是市值）；外國股票會有小數
+    currency: str       # 外幣幣別，台股是空字串
+    raw: str            # PDF 原文，人工校正時方便對照
 
 
 @dataclass(frozen=True)
@@ -30,13 +37,8 @@ class Header:
     children: tuple[str, ...]       # 未成年子女，名字會打碼，例如「謝○均」
 
 
-# 一行股票：名稱 所有人 股數 票面價額 [外幣幣別] 新臺幣總額
-#   例：「高興昌 謝俊雄 16,000 10 160,000」
-STOCK_ROW = re.compile(
-    r"^(?P<name>\S+) (?P<holder>\S+) (?P<shares>[\d,]+) (?P<face>[\d.,]+) "
-    r"(?:(?P<currency>\S+) )?(?P<total>[\d,]+)$")
 STOCK_START = "1.股票（總價額"
-STOCK_END = "2.債券"
+STOCK_HEADER = ["名稱", "所有人", "股數", "票面價額", "外幣幣別"]   # 股票表的前 5 欄
 
 
 def pdf_text(path: Path) -> str:
@@ -45,8 +47,10 @@ def pdf_text(path: Path) -> str:
         return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
 
-def _int(text: str) -> int:
-    return int(text.replace(",", ""))
+def pdf_tables(path: Path) -> list[Table]:
+    """抽出整份 PDF 每一頁的所有表格（依頁碼順序）。"""
+    with pdfplumber.open(path) as pdf:
+        return [table for page in pdf.pages for table in page.extract_tables()]
 
 
 def parse_header(text: str) -> Header:
@@ -68,26 +72,91 @@ def parse_header(text: str) -> Header:
     )
 
 
-def parse_stocks(text: str) -> tuple[list[StockLine], int | None]:
-    """抓「1.股票」那一節。回傳（每一列股票, 表上寫的總價額）；本欄空白時是 ([], None)。
-
-    頁尾（監察院公報…）和跨頁重印的欄位標題對不上 STOCK_ROW，會自然被跳過。
-    """
+def stated_stock_total(text: str) -> int | None:
+    """表上寫的股票總價額；本欄空白時是 None。用來和每列加總對帳。"""
     start = text.find(STOCK_START)
     if start == -1:
         raise CrawlError("找不到「1.股票」這一節，PDF 格式可能改了")
-    end = text.find(STOCK_END, start)
-    section = text[start:end if end != -1 else None]
+    first_line = text[start:].splitlines()[0]
+    match = re.search(r"總價額：新臺幣\s*([\d,]+)\s*元", first_line)
+    return int(match.group(1).replace(",", "")) if match else None
 
-    stated = re.search(r"總價額：新臺幣\s*([\d,]+)\s*元", section.splitlines()[0])
+
+def _clean(cell: str | None) -> str:
+    """格子裡的換行接回去，例如「華南金「交付臺灣銀行信\\n託」」→「華南金「交付臺灣銀行信託」」"""
+    return (cell or "").replace("\n", "").strip()
+
+
+def _number(text: str) -> Decimal | None:
+    try:
+        return Decimal(text.replace(",", ""))
+    except InvalidOperation:
+        return None
+
+
+def is_stock_table(table: Table) -> bool:
+    """第一列是「名稱 所有人 股數 票面價額 外幣幣別 …」的就是股票表（債券、基金表的欄位不一樣）。"""
+    if not table or len(table[0]) != 6:
+        return False
+    return [_clean(c).replace(" ", "") for c in table[0][:5]] == STOCK_HEADER
+
+
+def _is_continuation(table: Table) -> bool:
+    """跨頁的接續表格沒有標題列：6 欄、而且第一個有股數的列，股數是數字。
+
+    標題列剛好在頁底時，標題第二行「總 額」會被擠到下一頁，變成 ['', '', '', '', '', '總 額']，
+    所以要跳過股數格是空的列再判斷。
+    """
+    if len(table[0]) != 6:
+        return False
+    first = next((row for row in table if _clean(row[2])), None)
+    return first is not None and _number(_clean(first[2])) is not None
+
+
+def _stock_rows(tables: list[Table]) -> list[list[str | None]]:
+    """股票表（去掉標題列）＋緊跟在後面的接續表格；碰到別的有標題的表格就停止。
+
+    注意存款表跨頁時也會出現「沒有標題的 6 欄表格」，所以只認股票表「後面」的接續。
+    """
+    rows: list[list[str | None]] = []
+    in_stock = False
+    for table in tables:
+        if is_stock_table(table):
+            in_stock = True
+            rows += table[1:]
+        elif in_stock and _is_continuation(table):
+            rows += table
+        else:
+            in_stock = False
+    return rows
+
+
+def parse_stock_tables(tables: list[Table]) -> list[StockLine]:
+    """從所有表格裡挑出股票那幾列，轉成 StockLine。「本欄空白」或股數不是數字的列直接跳過。"""
     lines = []
-    for raw in section.splitlines()[1:]:
-        match = STOCK_ROW.match(raw.strip())
-        if match:
-            lines.append(StockLine(
-                name=match["name"], holder=match["holder"], shares=_int(match["shares"]),
-                total=_int(match["total"]), raw=raw.strip()))
-    return lines, _int(stated.group(1)) if stated else None
+    for row in _stock_rows(tables):
+        if len(row) != 6:
+            continue
+        name, holder, shares, _face, currency, total = (_clean(c) for c in row)
+        shares_n, total_n = _number(shares), _number(total)
+        if not name or shares_n is None or total_n is None:
+            continue
+        lines.append(StockLine(
+            name=name,
+            holder=holder.replace(" ", ""),     # 信託股票的所有人會抽成「林 楚茵」
+            shares=int(shares_n),
+            total=total_n,
+            currency=currency,
+            raw=" ".join(_clean(c) for c in row if _clean(c)),
+        ))
+    return lines
+
+
+def totals_match(lines: list[StockLine], stated: int | None) -> bool:
+    """每列加總是否等於表上總價額。外幣換算會有小數，差在列數（每列最多四捨五入差 1 元）以內都算對。"""
+    if stated is None:
+        return not lines
+    return abs(sum(line.total for line in lines) - stated) <= max(1, len(lines))
 
 
 def _masked_equal(masked: str, name: str) -> bool:

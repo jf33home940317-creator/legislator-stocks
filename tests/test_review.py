@@ -1,10 +1,12 @@
 import datetime as dt
+from decimal import Decimal
 
 import pytest
 
 from app.crawler.declarations.csv_import import CsvImportError, import_holdings
 from app.crawler.declarations.pdf_parse import Header, StockLine
-from app.crawler.declarations.review import chinese_name, match_code, review_rows, write_review_csv
+from app.crawler.declarations.review import (
+    chinese_name, match_code, name_index, normalize_name, review_rows, write_review_csv)
 from app.models import Politician, Stock
 
 HEADER = Header("王小明", dt.date(2025, 11, 1), spouses=("陳美麗",), children=())
@@ -12,8 +14,8 @@ CODES = {"台積電": "2330", "鴻海": "2317"}
 ALIASES = {"台積": "2330"}
 
 
-def line(name: str, holder: str, shares: int) -> StockLine:
-    return StockLine(name=name, holder=holder, shares=shares, total=shares * 10,
+def line(name: str, holder: str, shares: int, currency: str = "") -> StockLine:
+    return StockLine(name=name, holder=holder, shares=shares, total=Decimal(shares * 10), currency=currency,
                      raw=f"{name} {holder} {shares} 10 {shares * 10}")
 
 
@@ -32,6 +34,28 @@ def test_match_code_exact_then_alias_never_guess():
     assert match_code("台積電", CODES, ALIASES) == "2330"
     assert match_code("台積", CODES, ALIASES) == "2330"      # 別名表
     assert match_code("鴻", CODES, ALIASES) is None          # 不做模糊比對
+
+
+def test_normalize_name():
+    assert normalize_name("台泥「交付臺灣銀行信託」") == "台泥"
+    assert normalize_name("臺化") == "台化"
+    assert normalize_name("國巨＊") == "國巨"
+
+
+def test_match_code_uses_normalized_name():
+    assert match_code("鴻海「交付臺灣銀行信託」", CODES, ALIASES) == "2317"
+
+
+def test_name_index_normalizes_db_names_but_skips_collisions():
+    index = name_index([("2327", "國巨*"), ("1111", "甲*"), ("2222", "甲＊"), ("2330", "台積電")])
+    assert index["國巨"] == "2327"          # PDF 寫「國巨＊」或「國巨「交付臺灣銀行信託」」都對得到
+    assert "甲" not in index                # 兩檔正規化後撞名 → 不加
+    assert index["台積電"] == "2330"
+
+
+def test_review_rows_flags_foreign_stock():
+    [row] = rows_for([line("台積電", "王小明", 1, currency="美元")])   # 就算名字對得上台股也不要
+    assert row["stock_code"] == "" and "外國股票" in row["problem"]
 
 
 def test_review_rows_clean():
@@ -95,3 +119,20 @@ def test_build_review_isolates_failures(session, tmp_path, monkeypatch):
     count, summary = review.build_review(session, ["甲", "壞掉", "乙"], tmp_path / "out.csv")
     assert count == 2                     # 甲、乙都有寫進去
     assert "失敗 1 位" in summary and "壞掉" in summary
+
+
+def test_review_one_strips_invisible_whitespace(session):
+    from app.crawler.declarations.review import review_one
+    # 找不到人會丟 CrawlError；名字帶 \r 時應該先被 strip，才會往下走到查詢（這裡用假 client 擋住）
+    session.add(Politician(id=7, name="王小明"))
+    session.flush()
+
+    class StopHere(Exception):
+        pass
+
+    class FakeClient:
+        def post(self, *args, **kwargs):
+            raise StopHere
+
+    with pytest.raises(StopHere):        # 有走到查詢 = 有找到立委
+        review_one(FakeClient(), session, "王小明\r", {}, {}, delay=0)
